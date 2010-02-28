@@ -321,6 +321,7 @@ class piratewalk:
 			mm_img = self.mm_obj.draw()
 			mm_img = Image.new('RGBA', mm_img.size, 'white')
 		else:
+			# mm_img = self.mm_obj.draw()
 			mm_img = Image.new('RGBA', (self.width, self.height), 'white')
 
 		self.mm_img = mm_img
@@ -330,7 +331,12 @@ class piratewalk:
 
 		if self.draw_flickr_shapefiles:
 			flickr_data = self.flickr_shapefiles_for_points(points)
-			self.mm(flickr_data['points'])
+
+			if len(flickr_data['points']):
+				self.mm(flickr_data['points'])
+			else:
+				self.mm(points)
+
 			kwargs['draw_polylines'] = flickr_data['shapes']
 
 		polylines = self.generate_polylines(points)
@@ -374,7 +380,7 @@ class piratewalk:
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, [points],
 								 color=points_colour,
 								 opacity=.4,
-								 line_width=6,
+								 line_width=10,
 								 return_as_cairo=True)
 
 		if len(polylines['small']):
@@ -539,7 +545,14 @@ class gpx(piratewalk):
 			logging.debug("parsing %s" % gpx)
 			et = ET.parse(gpx)
 
+			# fix me: figure out which one we need to use...
+
 			for r in et.findall('.//{http://www.topografix.com/GPX/1/1}rtept'):
+				lat = float(r.attrib['lat'])
+				lon = float(r.attrib['lon'])
+				points.append({ 'latitude' : float(lat), 'longitude' : float(lon) })
+
+			for r in et.findall('.//{http://www.topografix.com/GPX/1/0}trkpt'):
 				lat = float(r.attrib['lat'])
 				lon = float(r.attrib['lon'])
 				points.append({ 'latitude' : float(lat), 'longitude' : float(lon) })

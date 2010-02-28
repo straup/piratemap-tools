@@ -359,7 +359,7 @@ class piratewalk:
 			for poly in kwargs['draw_polylines']:
 
 				self.mm_img = self.mm_markers.draw_polyline(self.mm_img, poly,
-									    opacity_fill=.1,
+									    opacity_fill=.05,
 									    color=(0, 0, 0),
 									    opacity_border=0,
 									    return_as_cairo=True)
@@ -380,21 +380,21 @@ class piratewalk:
 		if len(polylines['small']):
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['small'],
 								 line_width=2,
-								 opacity=.1,
+								 opacity=.05,
 								 color=roads_colour,
 								 return_as_cairo=True)
 
 		if len(polylines['medium']):
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['medium'],
 								 line_width=4,
-								 opacity=.1,
+								 opacity=.05,
 								 color=roads_colour,
 								 return_as_cairo=True)
 
 		if len(polylines['big']):
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['big'],
 								 line_width=6,
-								 opacity=.1,
+								 opacity=.05,
 								 color=roads_colour,
 								 return_as_cairo=True)
 

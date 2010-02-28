@@ -7,7 +7,7 @@ import os.path
 import logging
 
 import Geohash
-import Image
+import cairo
 import Flickr.API
 
 import types
@@ -49,6 +49,7 @@ class piratewalk:
 		self.zoom = kwargs.get('zoom', 16)
 
 		self.max_distance = kwargs.get('max_distance', .1)
+		self.draw_raster_map = kwargs.get('draw_raster_map', False)
 
 		self.mm_obj = None
 		self.mm_img = None
@@ -291,38 +292,80 @@ class piratewalk:
 
 	def mm(self, points):
 
-		provider = ModestMaps.builtinProviders[ 'MICROSOFT_AERIAL' ]()
-
 		bbox = self.calculate_bbox_for_points(points)
 
 		if self.method == 'bbox':
 			bbox = self.adjust_bbox(bbox, .5)
 
+		self.bbox = bbox
+
 		dims = ModestMaps.Core.Point(self.width, self.height)
 		sw = ModestMaps.Geo.Location(bbox[0], bbox[1])
 		ne = ModestMaps.Geo.Location(bbox[2], bbox[3])
+
+		provider = ModestMaps.builtinProviders[ 'MICROSOFT_AERIAL' ]()
 
 		if self.method == 'bbox':
 			mm_obj = ModestMaps.mapByExtentZoom(provider, sw, ne, self.zoom)
 		else:
 			mm_obj = ModestMaps.mapByExtent(provider, sw, ne, dims)
 
+		self.mm_provider = provider
 		self.mm_obj = mm_obj
 		self.mm_markers = modestMMarkers.modestMMarkers(self.mm_obj)
 
 		return True
 
+	def save(self, path):
+
+		if isinstance(self.mm_img, cairo.ImageSurface) :
+			fh = open(path, 'wb')
+			self.mm_img.write_to_png(fh)
+			fh.close()
+
+		img = modestMMarkers.cairo2pil(self.mm_img)
+		img.save(path)
+
 	def draw_base_map(self):
 
 		logging.debug("draw base map using %s method" % self.method)
 
-		if self.method == 'bbox':
-			# please to just count rows and cols and multiple by 256...
+		if self.draw_raster_map:
+			logging.debug("draw base map raster tiles")
 			mm_img = self.mm_obj.draw()
-			mm_img = Image.new('RGBA', mm_img.size, 'white')
 		else:
-			# mm_img = self.mm_obj.draw()
-			mm_img = Image.new('RGBA', (self.width, self.height), 'white')
+
+			if self.method == 'bbox':
+
+				swlat, swlon, nelat, nelon = self.bbox
+
+				nwlat = nelat
+				nwlon = swlon
+				selat = swlat
+				selon = nelon
+
+				nw = ModestMaps.Geo.Location(nwlat, nwlon)
+				se = ModestMaps.Geo.Location(selat, selon)
+
+				tl = self.mm_provider.locationCoordinate(nw).zoomTo(self.zoom).container()
+				br = self.mm_provider.locationCoordinate(se).zoomTo(self.zoom).container()
+
+				rows = int(br.row - tl.row)
+				cols = int(br.column - tl.column)
+
+				self.height = rows * 256
+				self.width = cols * 256
+
+			logging.debug("base map dimensions: %s, %s" % (self.width, self.height))
+
+			# Maybe hide all of this in modestMMarkers?
+			# Also make this an SVG surface? Requires tweaking in modestMMarkers.
+
+			mm_img = cairo.ImageSurface(cairo.FORMAT_ARGB32, self.width, self.height)
+			ctx = cairo.Context(mm_img)
+			ctx.rectangle(0, 0, self.width, self.height)
+			ctx.set_source_rgba(1, 1, 1, 1)
+			ctx.fill()
 
 		self.mm_img = mm_img
 		return True
@@ -352,6 +395,8 @@ class piratewalk:
 			logging.error("failed to draw base map")
 			return False
 
+		road_opacity = .075
+
 		polylines_colour = (0, 0, 0)
 		points_colour = (.7, .7, .7)
 		roads_colour = (255, 0, 132)
@@ -362,6 +407,8 @@ class piratewalk:
 
 		if kwargs.get('draw_polylines', False):
 
+			logging.debug("draw polylines")
+
 			for poly in kwargs['draw_polylines']:
 
 				self.mm_img = self.mm_markers.draw_polyline(self.mm_img, poly,
@@ -371,12 +418,18 @@ class piratewalk:
 									    return_as_cairo=True)
 
 		if kwargs.get('draw_points', False):
+
+			logging.debug("draw points")
+
 			self.mm_img = self.mm_markers.draw_points(self.mm_img, points,
 								  color=points_colour,
 								  opacity_fill=.4,
 								  return_as_cairo=True)
 
 		if kwargs.get('draw_points_as_line', False):
+
+			logging.debug("draw points as lines")
+
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, [points],
 								 color=points_colour,
 								 opacity=.4,
@@ -384,28 +437,36 @@ class piratewalk:
 								 return_as_cairo=True)
 
 		if len(polylines['small']):
+
+			logging.debug("draw small roads")
+
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['small'],
 								 line_width=2,
-								 opacity=.05,
+								 opacity=road_opacity,
 								 color=roads_colour,
 								 return_as_cairo=True)
 
 		if len(polylines['medium']):
+
+			logging.debug("draw medium roads")
+
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['medium'],
 								 line_width=4,
-								 opacity=.05,
+								 opacity=road_opacity,
 								 color=roads_colour,
 								 return_as_cairo=True)
 
 		if len(polylines['big']):
+
+			logging.debug("draw big roads")
+
 			self.mm_img = self.mm_markers.draw_lines(self.mm_img, polylines['big'],
 								 line_width=6,
-								 opacity=.05,
+								 opacity=road_opacity,
 								 color=roads_colour,
 								 return_as_cairo=True)
 
-		self.mm_img = modestMMarkers.cairo2pil(self.mm_img)
-		return self.mm_img
+		return True
 
 	def geohash_for_point(self, pt, precision=12):
 
@@ -682,7 +743,7 @@ class flickr(piratewalk):
 				fname = "%s_%s.png" % (prefix, ts_now)
 				path = os.path.join(root, fname)
 
-				mm_img.save(path)
+				self.save(path)
 				images.append(path)
 
 		return images

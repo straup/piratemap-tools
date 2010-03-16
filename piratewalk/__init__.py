@@ -322,6 +322,7 @@ class piratewalk:
 			fh = open(path, 'wb')
 			self.mm_img.write_to_png(fh)
 			fh.close()
+			return
 
 		img = modestMMarkers.cairo2pil(self.mm_img)
 		img.save(path)
@@ -373,7 +374,7 @@ class piratewalk:
 	def render_map_simple(self, points, **kwargs):
 
 		if self.draw_flickr_shapefiles:
-			flickr_data = self.flickr_shapefiles_for_points(points)
+			flickr_data = self.flickr_shapefiles_for_points(points, **kwargs)
 
 			if len(flickr_data['points']):
 				self.mm(flickr_data['points'])
@@ -383,8 +384,9 @@ class piratewalk:
 			kwargs['draw_polylines'] = flickr_data['shapes']
 
 		polylines = self.generate_polylines(points)
+		ret = self.render_map(points, polylines, **kwargs)
 
-		return self.render_map(points, polylines, **kwargs)
+		return ret
 
 	def render_map(self, points, polylines, **kwargs):
 
@@ -395,7 +397,9 @@ class piratewalk:
 			logging.error("failed to draw base map")
 			return False
 
-		road_opacity = .075
+		road_opacity = .01
+		points_opacity = .01
+		polylines_opacity = .01
 
 		polylines_colour = (0, 0, 0)
 		points_colour = (.7, .7, .7)
@@ -412,7 +416,7 @@ class piratewalk:
 			for poly in kwargs['draw_polylines']:
 
 				self.mm_img = self.mm_markers.draw_polyline(self.mm_img, poly,
-									    opacity_fill=.05,
+									    opacity_fill=polylines_opacity,
 									    color=(0, 0, 0),
 									    opacity_border=0,
 									    return_as_cairo=True)
@@ -423,7 +427,7 @@ class piratewalk:
 
 			self.mm_img = self.mm_markers.draw_points(self.mm_img, points,
 								  color=points_colour,
-								  opacity_fill=.4,
+								  opacity_fill=points_opacity,
 								  return_as_cairo=True)
 
 		if kwargs.get('draw_points_as_line', False):
@@ -475,7 +479,7 @@ class piratewalk:
 
 		return gh
 
-	def flickr_shapefiles_for_points(self, points):
+	def flickr_shapefiles_for_points(self, points, **kwargs):
 
 		flickr = { 'shapes' : [], 'points' : [] }
 
@@ -483,8 +487,16 @@ class piratewalk:
 
 			logging.debug("fetch woeid and shapedata for %s,%s" % (pt['latitude'], pt['longitude']))
 
+			valid_placetypes = kwargs.get('valid_placetypes', None)
+
 			gh = self.geohash_for_point(pt, 6)
+
+			if valid_placetypes:
+				gh = "%s#%s" % (gh, str(valid_placetypes))
+
 			data = self.flickr_cache_fetch(gh)
+
+			# fix this to account for placetype...
 
 			if data:
 				logging.debug("return shape data from cache")
@@ -510,10 +522,19 @@ class piratewalk:
 					continue
 
 				if data['places']['total'] == 0:
-					logging.debug("not able to reverse geocode")
+					logging.debug("no results for reverse geocoding, caching as empty")
+					self.flickr_cache_set(gh, [])
 					continue
 
+				#
+
 				woeid = data['places']['place'][0]['woeid']
+				placetype = int(data['places']['place'][0]['place_type_id'])
+
+				if valid_placetypes and not placetype in valid_placetypes:
+					logging.info("WOE ID %s (%s) has wrong place type: %s, caching as empty" % (woeid, gh, placetype))
+					self.flickr_cache_set(gh, [])
+					continue
 
 				# places.info - cache me...
 
@@ -534,7 +555,8 @@ class piratewalk:
 				shapedata = data['place'].get('shapedata', None)
 
 				if not shapedata:
-					logging.debug("no shape for %s" % woeid)
+					logging.debug("no shape for %s, caching as empty" % woeid)
+					self.flickr_cache_set(gh, [])
 					continue
 
 				#
@@ -618,7 +640,7 @@ class gpx(piratewalk):
 				lon = float(r.attrib['lon'])
 				points.append({ 'latitude' : float(lat), 'longitude' : float(lon) })
 
-		return self.render_map_simple(points, draw_points_as_line=True)
+		return self.render_map_simple(points, draw_points_as_line=True, draw_points=True)
 
 class flickr(piratewalk):
 
@@ -689,8 +711,8 @@ class flickr(piratewalk):
 	def draw_photos_search_iterate(self, **kwargs):
 
 		collect = kwargs.get('collect', True)
-
 		all_points = []
+
 		images = []
 
 		# this is deliberately simple and not very fine-grained
@@ -728,7 +750,7 @@ class flickr(piratewalk):
 				break
 
 			kwargs['search_args']['min_upload_date'] = ts_now
-			kwargs['search_args']['max_upload_date'] = ts_then
+			kwargs['search_args']['max_upload_date'] = ts_then - 1
 
 			points = self.photos_search(kwargs['search_args'])
 
@@ -742,6 +764,8 @@ class flickr(piratewalk):
 
 				fname = "%s_%s.png" % (prefix, ts_now)
 				path = os.path.join(root, fname)
+
+				logging.debug("save image to %s" % path)
 
 				self.save(path)
 				images.append(path)
